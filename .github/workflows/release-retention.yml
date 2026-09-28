@@ -1,0 +1,44 @@
+name: Keep latest 3 releases
+
+on:
+  release:
+    types: [published]
+  # Catch delayed asset uploads or releases made with GITHUB_TOKEN.
+  schedule:
+    - cron: '17 18 * * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Delete older releases and assets (false = preview only)'
+        type: boolean
+        default: false
+
+permissions: {}
+concurrency:
+  group: release-retention
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.repository == 'animochoi-2026/FineDiaryMessenger'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Load maintenance code from default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: release_maintenance
+      - name: Preview or apply retention policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLY: ${{ github.event_name != 'workflow_dispatch' || inputs.apply }}
+        run: |
+          if [ "$APPLY" = "true" ]; then
+            python3 release_maintenance/prune_releases.py --apply
+          else
+            python3 release_maintenance/prune_releases.py
+          fi
