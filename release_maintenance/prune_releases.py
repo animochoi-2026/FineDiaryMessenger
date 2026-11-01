@@ -1,6 +1,6 @@
 """Release-only repository maintenance. Never imported by the desktop app.
 
-Keep the three highest numeric versions (including historical prereleases).
+Keep the three highest numeric versions PER CHANNEL (identified by assets).
 Delete release records/assets only; never tags, commits or local app files.
 Default is a read-only plan. --apply is reserved for the repository workflow.
 """
@@ -12,6 +12,7 @@ import urllib.request
 
 REPOSITORY = "animochoi-2026/FineDiaryMessenger"
 ASSET = "FineDiaryMessenger-windows-x64.zip"
+TEST_ASSET = "FineDiaryMessenger-test-windows-x64.zip"
 KEEP = 3
 
 
@@ -22,10 +23,10 @@ def version(tag):
     return parts + (0,) * (3 - len(parts))
 
 
-def uploaded_package(release):
+def uploaded_package(release, asset_name=ASSET):
     prefix = f"https://github.com/{REPOSITORY}/releases/download/{release['tag_name']}/"
     assets = release.get("assets", [])
-    for name in (ASSET, ASSET + ".sha256"):
+    for name in (asset_name, asset_name + ".sha256"):
         matches = [asset for asset in assets if asset.get("name") == name]
         if len(matches) != 1:
             return False
@@ -33,7 +34,7 @@ def uploaded_package(release):
         if (asset.get("state") != "uploaded" or not asset.get("size", 0) > 0
                 or asset.get("browser_download_url") != prefix + name):
             return False
-        if name == ASSET and not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", asset.get("digest") or ""):
+        if name == asset_name and not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", asset.get("digest") or ""):
             return False
     return True
 
@@ -48,9 +49,21 @@ def retention_plan(releases):
         raise ValueError("Duplicate version or release ID; nothing deleted")
     if any(type(ident) is not int or ident <= 0 for ident in ids):
         raise ValueError("Invalid release ID; nothing deleted")
-    keep, remove = releases[:KEEP], releases[KEEP:]
-    if remove and not all(uploaded_package(r) for r in keep):
-        raise ValueError("Retained packages are not fully uploaded/verified; nothing deleted")
+    def assets_for(release):
+        names = {a.get('name') for a in release.get('assets', [])}
+        found = {a for a in (ASSET, TEST_ASSET) if a in names or a + '.sha256' in names}
+        return found or {ASSET}  # unfinished legacy stable release must block cleanup
+    protected = set()
+    required = []
+    for asset in (ASSET, TEST_ASSET):
+        candidates = [r for r in releases if asset in assets_for(r)]
+        for release in candidates[:KEEP]:
+            protected.add(release['id'])
+            required.append((release, asset))
+    keep = [r for r in releases if r['id'] in protected]
+    remove = [r for r in releases if r['id'] not in protected]
+    if remove and not all(uploaded_package(r, asset) for r, asset in required):
+        raise ValueError("Retained channel packages are not fully uploaded/verified; nothing deleted")
     return keep, remove
 
 
