@@ -1,4 +1,4 @@
-name: Keep latest 3 releases
+name: Keep latest 3 releases per channel
 
 on:
   release:
